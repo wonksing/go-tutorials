@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/IBM/sarama"
-	"github.com/eapache/go-resiliency/breaker"
 )
 
 // Sarama configuration options
@@ -23,6 +22,7 @@ var (
 	version   = ""
 	topic     = ""
 	producers = 1
+	duraion   = 0
 	verbose   = false
 
 	brokerList []string
@@ -33,6 +33,7 @@ func init() {
 	flag.StringVar(&version, "version", sarama.DefaultVersion.String(), "Kafka cluster version")
 	flag.StringVar(&topic, "topic", "tp-txn", "Kafka topics where records will be copied from topics.")
 	flag.IntVar(&producers, "producers", 10, "Number of concurrent producers")
+	flag.IntVar(&duraion, "duration", 10, "Duration in seconds to produce messages")
 	flag.BoolVar(&verbose, "verbose", false, "Sarama logging")
 	flag.Parse()
 
@@ -46,7 +47,6 @@ func init() {
 
 	brokerList = strings.Split(brokers, ",")
 }
-
 func main() {
 
 	if verbose {
@@ -59,12 +59,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	producer, err := sarama.NewSyncProducer(brokerList, config)
+	producer, err := sarama.NewAsyncProducer(brokerList, config)
 	if err != nil {
 		log.Printf("failed to create sync producer: %v\n", err)
 		os.Exit(1)
 	}
-	defer producer.Close()
+	// defer producer.Close()
 
 	sigterm := make(chan os.Signal, 1)
 	signal.Notify(sigterm, syscall.SIGINT, syscall.SIGTERM)
@@ -72,38 +72,46 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var success, failure int64
+	var sent, success, failure int64
+	var wgErr sync.WaitGroup
+	wgErr.Add(1)
+	go func(wg *sync.WaitGroup) {
+		defer wg.Done()
+		for pe := range producer.Errors() {
+			log.Println("fail: " + pe.Error())
+			atomic.AddInt64(&failure, 1)
+		}
+		log.Printf("exiting from receiving errors\n")
+	}(&wgErr)
+
+	log.Println("start producing messages asynchronously")
 	var wg sync.WaitGroup
 	for i := 0; i < producers; i++ {
 		wg.Add(1)
 		go func(wg *sync.WaitGroup, i int) {
 			defer wg.Done()
-			ticker := time.NewTicker(80 * time.Millisecond)
+			ticker := time.NewTicker(50 * time.Millisecond)
 			defer ticker.Stop()
 
 			j := 0
 			for {
 				select {
 				case <-ticker.C:
-					err := produce(producer, &sarama.ProducerMessage{
+					producer.Input() <- &sarama.ProducerMessage{
 						Topic: topic,
 						Key:   sarama.ByteEncoder(fmt.Sprintf("%d-%d", i, j)),
 						Value: sarama.StringEncoder(fmt.Sprintf("message %d %d", i, j)),
-					})
-					if err != nil {
-						log.Printf("error: failed to produce: %v\n", err)
-						atomic.AddInt64(&failure, 1)
-						continue
 					}
-					atomic.AddInt64(&success, 1)
+					atomic.AddInt64(&sent, 1)
 				case <-ctx.Done():
+					log.Printf("exiting producer: %d\n", i)
 					return
 				}
 			}
 		}(&wg, i)
 	}
 
-	timer := time.NewTimer(180 * time.Second)
+	timer := time.NewTimer(time.Duration(duraion) * time.Second)
 	defer timer.Stop()
 
 	select {
@@ -113,12 +121,21 @@ func main() {
 
 	cancel()
 	wg.Wait()
-	fmt.Printf("success=%d, failure=%d\n", success, failure)
+	fmt.Printf("closing producer\n")
+	err = producer.Close()
+	if err != nil {
+		if pe, ok := err.(sarama.ProducerErrors); ok {
+			atomic.AddInt64(&failure, int64(len(pe)))
+		}
+	}
+	wgErr.Wait()
+	fmt.Printf("finished producing messages: sent=%d, success=%d, failure=%d\n", sent, success, failure)
 }
 
 func buildConfig() (*sarama.Config, error) {
 	version, err := sarama.ParseKafkaVersion(version)
 	if err != nil {
+		// log.Panicf("Error parsing Kafka version: %v", err)
 		return nil, err
 	}
 
@@ -135,12 +152,18 @@ func buildConfig() (*sarama.Config, error) {
 		return v
 	}
 	config.Producer.RequiredAcks = sarama.WaitForAll
+	config.Producer.Return.Successes = false
 	config.Producer.Return.Errors = true
-	config.Producer.Return.Successes = true
 	config.Net.ReadTimeout = 10 * time.Second
 	config.Net.WriteTimeout = 10 * time.Second
 	config.Net.DialTimeout = 10 * time.Second
 	config.Net.MaxOpenRequests = 1
+	config.ChannelBufferSize = 1024
+	config.Producer.Timeout = 3000 * time.Millisecond
+	config.Producer.Flush.Frequency = 3 * time.Second
+	config.Producer.Flush.Messages = 512
+	config.Producer.Flush.MaxMessages = 1024
+
 	config.Metadata.Retry.Max = 10
 	config.Metadata.Retry.BackoffFunc = func(retries int, maxRetries int) time.Duration {
 		v := (1 << retries) * 250 * time.Millisecond
@@ -149,46 +172,6 @@ func buildConfig() (*sarama.Config, error) {
 		}
 		return v
 	}
-	config.Metadata.RefreshFrequency = 1 * time.Minute
+	config.Metadata.RefreshFrequency = 5 * time.Minute
 	return config, nil
-}
-
-func produce(producer sarama.SyncProducer, message *sarama.ProducerMessage) error {
-	var err error
-	attempts := 0
-	wait := 1000 * time.Millisecond
-	for attempts < 5 {
-		attempts++
-		_, _, err = producer.SendMessage(message)
-		if err != nil {
-			if isRetryableError(err) {
-				log.Printf("retrying in %.3f second(s): (%d/5)\n", wait.Seconds(), attempts)
-				time.Sleep(wait)
-				continue
-			}
-			return err
-		}
-		return nil
-	}
-	return err
-}
-
-func isRetryableError(err error) bool {
-	switch err {
-	case sarama.ErrBrokerNotAvailable,
-		sarama.ErrLeaderNotAvailable,
-		sarama.ErrReplicaNotAvailable,
-		sarama.ErrRequestTimedOut,
-		sarama.ErrNotEnoughReplicas,
-		// sarama.ErrNotEnoughReplicasAfterAppend, // "kafka server: Messages are written to the log, but to fewer in-sync replicas than required"
-		// sarama.ErrNetworkException, // "kafka server: The server disconnected before a response was received"
-		sarama.ErrOutOfBrokers,
-		sarama.ErrOutOfOrderSequenceNumber,
-		sarama.ErrNotController,
-		sarama.ErrNotLeaderForPartition,
-		breaker.ErrBreakerOpen:
-		return true
-	default:
-		return false
-	}
 }
