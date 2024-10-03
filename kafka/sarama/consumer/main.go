@@ -100,13 +100,21 @@ func buildConfig() (*sarama.Config, error) {
 		return nil, err
 	}
 	config.Version = v
+
+	config.ChannelBufferSize = 1024
+
+	config.Net.ReadTimeout = 30 * time.Second
+	config.Net.WriteTimeout = 30 * time.Second
+	config.Net.DialTimeout = 30 * time.Second
+	config.Net.MaxOpenRequests = 1
+
 	config.Consumer.Group.Rebalance.Strategy = sarama.NewBalanceStrategyRange()
 	config.Consumer.Offsets.Initial = sarama.OffsetOldest
 
 	config.Consumer.Group.Session.Timeout = time.Duration(60) * time.Second
 	config.Consumer.Group.Heartbeat.Interval = time.Duration(60/3) * time.Second
 
-	config.Metadata.RefreshFrequency = 1 * time.Minute // consumer starts rebalancing right after started, and it freezes
+	config.Metadata.RefreshFrequency = 5 * time.Minute // consumer starts rebalancing right after started, and it freezes
 	return config, nil
 }
 

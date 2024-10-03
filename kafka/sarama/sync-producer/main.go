@@ -123,8 +123,15 @@ func buildConfig() (*sarama.Config, error) {
 	}
 
 	config := sarama.NewConfig()
-	config.ClientID = "test_retry"
+	config.ClientID = "test-sync-producer"
 	config.Version = version
+
+	config.Net.ReadTimeout = 30 * time.Second
+	config.Net.WriteTimeout = 30 * time.Second
+	config.Net.DialTimeout = 30 * time.Second
+	config.Net.MaxOpenRequests = 1
+
+	config.Producer.Timeout = 30 * time.Second
 	config.Producer.Idempotent = true
 	config.Producer.Retry.Max = 10
 	config.Producer.Retry.BackoffFunc = func(retries int, maxRetries int) time.Duration {
@@ -137,10 +144,7 @@ func buildConfig() (*sarama.Config, error) {
 	config.Producer.RequiredAcks = sarama.WaitForAll
 	config.Producer.Return.Errors = true
 	config.Producer.Return.Successes = true
-	config.Net.ReadTimeout = 10 * time.Second
-	config.Net.WriteTimeout = 10 * time.Second
-	config.Net.DialTimeout = 10 * time.Second
-	config.Net.MaxOpenRequests = 1
+
 	config.Metadata.Retry.Max = 10
 	config.Metadata.Retry.BackoffFunc = func(retries int, maxRetries int) time.Duration {
 		v := (1 << retries) * 250 * time.Millisecond
@@ -149,7 +153,7 @@ func buildConfig() (*sarama.Config, error) {
 		}
 		return v
 	}
-	config.Metadata.RefreshFrequency = 1 * time.Minute
+	config.Metadata.RefreshFrequency = 5 * time.Minute
 	return config, nil
 }
 
@@ -162,7 +166,7 @@ func produce(producer sarama.SyncProducer, message *sarama.ProducerMessage) erro
 		_, _, err = producer.SendMessage(message)
 		if err != nil {
 			if isRetryableError(err) {
-				log.Printf("retrying in %.3f second(s): (%d/5)\n", wait.Seconds(), attempts)
+				log.Printf("manual retrying in %.3f second(s): (%d/5)\n", wait.Seconds(), attempts)
 				time.Sleep(wait)
 				continue
 			}

@@ -60,21 +60,13 @@ func (cg *ConsumerGroup) Start(loaded chan bool) error {
 					return
 				}
 				log.Panicf("Error from consumer: %v\n", err)
-				// log.Println("consume error: " + err.Error())
-				// for i := 0; i < 12; i++ {
-				// 	time.Sleep(time.Second * 1)
-				// 	if ctx.Err() != nil {
-				// 		startErr = ctx.Err()
-				// 		return
-				// 	}
-				// }
 			}
 			// check if context was cancelled, signaling that the consumer should stop
 			if ctx.Err() != nil {
 				startErr = ctx.Err()
 				return
 			}
-			// consumer.ready = make(chan bool)
+
 			cg.consumer.MakeReady()
 		}
 	}(&wg)

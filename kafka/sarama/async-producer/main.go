@@ -142,6 +142,15 @@ func buildConfig() (*sarama.Config, error) {
 	config := sarama.NewConfig()
 	config.ClientID = "test_retry"
 	config.Version = version
+
+	config.ChannelBufferSize = 1024
+
+	config.Net.ReadTimeout = 30 * time.Second
+	config.Net.WriteTimeout = 30 * time.Second
+	config.Net.DialTimeout = 30 * time.Second
+	config.Net.MaxOpenRequests = 1
+
+	config.Producer.Timeout = 30 * time.Second
 	config.Producer.Idempotent = true
 	config.Producer.Retry.Max = 10
 	config.Producer.Retry.BackoffFunc = func(retries int, maxRetries int) time.Duration {
@@ -154,12 +163,6 @@ func buildConfig() (*sarama.Config, error) {
 	config.Producer.RequiredAcks = sarama.WaitForAll
 	config.Producer.Return.Successes = false
 	config.Producer.Return.Errors = true
-	config.Net.ReadTimeout = 10 * time.Second
-	config.Net.WriteTimeout = 10 * time.Second
-	config.Net.DialTimeout = 10 * time.Second
-	config.Net.MaxOpenRequests = 1
-	config.ChannelBufferSize = 1024
-	config.Producer.Timeout = 3000 * time.Millisecond
 	config.Producer.Flush.Frequency = 3 * time.Second
 	config.Producer.Flush.Messages = 512
 	config.Producer.Flush.MaxMessages = 1024
