@@ -35,7 +35,7 @@ func main() {
 	ctx := context.Background()
 	timeout := 15 * time.Second
 	l := distlock.NewDistLockValkeyV2(client, "key-prefix:", "chan-prefix:", timeout, 0)
-	a := adapter.NewReserveValkey(client, "reserve:", 20)
+	a := adapter.NewReserveValkey(client, "reserve:", 10)
 	u := usecase.NewApppushReserve(l, a)
 
 	// simple
@@ -89,8 +89,8 @@ func main() {
 	// fmt.Printf("done... %d\n", suc.Load())
 
 	// multi random
-	// userIds := []uint64{1, 2, 3, 4, 5}
-	userIds := []uint64{1}
+	userIds := []uint64{1, 2, 3, 4, 5}
+	// userIds := []uint64{1}
 	liveIds := []uint64{10108, 10109, 10110, 10111, 10112}
 	// rand.Int63n(5)
 	numTests := 300

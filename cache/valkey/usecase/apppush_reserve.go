@@ -54,23 +54,28 @@ func (u *ApppushReserve) load(ctx context.Context, userId uint64) (string, error
 	lockKey := fmt.Sprintf("reserve:%d", userId)
 	err := u.l.Lock(ctx, lockKey, "get-reserve-lock")
 	if err != nil {
-		fmt.Printf("err: lock: %v\n", err)
 		v, err := u.a.ZGetReserve(ctx, userId)
 		if err != nil {
-			return "", err
+			if !errors.Is(err, errorz.ErrResourceNotFound) {
+				return "", err
+			}
 		}
 		return v, nil
 	}
 	defer u.l.Unlock(ctx, lockKey, "get-reserve-unlock")
 
 	// read from storage
-	var someLiveId uint64 = 90203
+	// return "", nil if no data found from storage
+	return "", nil
 
-	// cache the result from storage
-	res, err := u.a.ZSetReserve(ctx, userId, someLiveId)
-	if err != nil {
-		return "", err
-	}
-
-	return res, nil
+	/*
+		// read from storage
+		var someLiveId uint64 = 90203
+		// cache the result from storage
+		res, err := u.a.ZSetReserve(ctx, userId, someLiveId)
+		if err != nil {
+			return "", err
+		}
+		return res, nil
+	*/
 }
