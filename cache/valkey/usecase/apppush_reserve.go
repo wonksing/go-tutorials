@@ -24,18 +24,25 @@ func NewApppushReserve(l *distlock.DistLockValkeyV2, a *adapter.ReserveValkey) *
 
 func (u *ApppushReserve) GetReserve(ctx context.Context, userId uint64) (string, error) {
 	r, err := u.a.ZGetReserve(ctx, userId)
-	if err == nil {
+	if err != nil {
+		if !errors.Is(err, errorz.ErrResourceNotFound) {
+			return "", err
+		}
+		// load
+	} else {
 		if r != "" {
-			// return immediately if found in cache
 			return r, nil
 		}
 
+		// check
 		err = u.a.ZSetExistsReserve(ctx, userId)
-		if err == nil {
+		if err != nil {
+			if !errors.Is(err, errorz.ErrResourceNotFound) {
+				return "", err
+			}
+			// load
+		} else {
 			return "", nil
-		}
-		if !errors.Is(err, errorz.ErrResourceNotFound) {
-			return "", err
 		}
 	}
 
