@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/valkey-io/valkey-go"
-	"github.com/wonksing/go-tutorials/cache/valkey/adapter"
 	"github.com/wonksing/go-tutorials/cache/valkey/distlock"
-	"github.com/wonksing/go-tutorials/cache/valkey/usecase"
+	"github.com/wonksing/go-tutorials/cache/valkey/reserve/adapter"
+	"github.com/wonksing/go-tutorials/cache/valkey/reserve/usecase"
 )
 
 var (
@@ -30,6 +30,109 @@ func init() {
 
 func main() {
 	defer client.Close()
+
+	zaddTest()
+}
+
+func zaddTest() {
+
+	// var err error
+	ctx := context.Background()
+	timeout := 15 * time.Second
+	// loadLock := distlock.NewDistLockValkeyV2(client, "key-prefix:load:", "chan-prefix:load:", timeout, 0)
+	// setLock := distlock.NewDistLockValkeyV2(client, "key-prefix:zadd:", "chan-prefix:zadd:", timeout, 3)
+	loadLock := distlock.NewDistLockValkeyV3(ctx, client, "key-prefix:load:", "chan-prefix:load:", timeout, 0)
+	defer loadLock.Close()
+	setLock := distlock.NewDistLockValkeyV3(ctx, client, "key-prefix:zadd:", "chan-prefix:zadd:", timeout, 3)
+	defer setLock.Close()
+	a := adapter.NewReserveValkey(client, "reserve:", 10)
+	u := usecase.NewApppushReserveV2(loadLock, setLock, a)
+
+	// simple
+	// res, err := u.SetReserve(ctx, 1, 10108)
+	// if err != nil {
+	// 	fmt.Printf("err: set reserve: %v\n", err)
+	// 	return
+	// }
+	// fmt.Println("set reserve:", res)
+
+	// multi
+	// userIds := []uint64{1, 1, 1, 1, 1}
+	// liveIds := []uint64{10108, 10109, 10110, 10111, 10112, 10112, 10112}
+	// var suc atomic.Int64
+	// for _, userId := range userIds {
+	// 	for _, liveId := range liveIds {
+	// 		_, err := u.SetReserve(ctx, userId, liveId)
+	// 		if err != nil {
+	// 			fmt.Printf("err: set reserve(%v, %v): %v\n", userId, liveId, err)
+	// 			return
+	// 		}
+	// 		// fmt.Printf("set reserve(%d, %v, %v): %v\n", i, userId, liveId, res)
+	// 		suc.Add(1)
+	// 	}
+	// }
+	// fmt.Printf("done... %d\n", suc.Load())
+
+	// multi sequential
+	// userIds := []uint64{1, 2, 3, 4, 5}
+	// liveIds := []uint64{10108, 10109, 10110, 10111, 10112}
+	// numTests := 30
+	// var wg sync.WaitGroup
+	// wg.Add(numTests * len(userIds))
+	// var suc, fail atomic.Int64
+	// for _, userId := range userIds {
+	// 	for i := 0; i < numTests; i++ {
+	// 		go func(i int, userId uint64) {
+	// 			defer wg.Done()
+	// 			liveId := liveIds[rand.Int63n(int64(len(liveIds)))]
+	// 			_, err := u.SetReserve(ctx, userId, liveId)
+	// 			if err != nil {
+	// 				fmt.Printf("err: set reserve(%d, %v, %v): %v\n", i, userId, liveId, err)
+	// 				fail.Add(1)
+	// 				return
+	// 			}
+	// 			// fmt.Printf("set reserve(%d, %v, %v): %v\n", i, userId, liveId, res)
+	// 			suc.Add(1)
+	// 		}(i, userId)
+	// 	}
+	// }
+	// wg.Wait()
+	// fmt.Printf("done... success=%d, failure=%d\n", suc.Load(), fail.Load())
+
+	// multi random
+	// userIds := []uint64{1, 2, 3, 4, 5}
+	userIds := []uint64{1}
+	liveIds := []uint64{10108, 10109, 10110, 10111, 10112}
+	numTests := 500
+	numOperations := 1000
+	var success, fail atomic.Int64
+	for j := 0; j < numTests; j++ {
+		var wg sync.WaitGroup
+		wg.Add(numOperations)
+		for i := 0; i < numOperations; i++ {
+			go func(i int) {
+				defer wg.Done()
+				userId := userIds[rand.Int63n(int64(len(userIds)))]
+				liveId := liveIds[rand.Int63n(int64(len(liveIds)))]
+				_, err := u.SetReserve(ctx, userId, liveId)
+				if err != nil {
+					fmt.Printf("err: set reserve(%d, %v, %v): %v\n", i, userId, liveId, err)
+					fail.Add(1)
+					return
+				}
+				// fmt.Printf("set reserve(%d, %v, %v): %v\n", i, userId, liveId, res)
+				success.Add(1)
+			}(i)
+		}
+		wg.Wait()
+		fmt.Printf("done: total=%d, success=%d, failure=%d, setCnt=%d, setFailCnt=%d\n",
+			success.Load()+fail.Load(), success.Load(), fail.Load(), u.SetCnt(), u.SetFailCnt())
+	}
+	fmt.Printf("done: total=%d, success=%d, failure=%d, setCnt=%d, setFailCnt=%d\n",
+		success.Load()+fail.Load(), success.Load(), fail.Load(), u.SetCnt(), u.SetFailCnt())
+}
+
+func casZaddTest() {
 
 	// var err error
 	ctx := context.Background()

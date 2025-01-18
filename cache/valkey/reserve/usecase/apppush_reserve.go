@@ -5,9 +5,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/wonksing/go-tutorials/cache/valkey/adapter"
 	"github.com/wonksing/go-tutorials/cache/valkey/distlock"
 	"github.com/wonksing/go-tutorials/cache/valkey/errorz"
+	"github.com/wonksing/go-tutorials/cache/valkey/reserve/adapter"
 )
 
 type ApppushReserve struct {
@@ -23,7 +23,7 @@ func NewApppushReserve(l *distlock.DistLockValkeyV2, a *adapter.ReserveValkey) *
 }
 
 func (u *ApppushReserve) GetReserve(ctx context.Context, userId uint64) (string, error) {
-	r, err := u.a.ZGetReserve(ctx, userId)
+	r, err := u.a.Zrange(ctx, userId)
 	if err != nil {
 		if !errors.Is(err, errorz.ErrResourceNotFound) {
 			return "", err
@@ -35,7 +35,7 @@ func (u *ApppushReserve) GetReserve(ctx context.Context, userId uint64) (string,
 		}
 
 		// check
-		err = u.a.ZSetExistsReserve(ctx, userId)
+		err = u.a.Exists(ctx, userId)
 		if err != nil {
 			if !errors.Is(err, errorz.ErrResourceNotFound) {
 				return "", err
@@ -52,7 +52,7 @@ func (u *ApppushReserve) GetReserve(ctx context.Context, userId uint64) (string,
 
 func (u *ApppushReserve) SetReserve(ctx context.Context, userId uint64, liveId uint64) (string, error) {
 	var err error
-	err = u.a.ZSetExistsReserve(ctx, userId)
+	err = u.a.Exists(ctx, userId)
 	if errors.Is(err, errorz.ErrResourceNotFound) {
 		_, err = u.load(ctx, userId)
 		if err != nil {
@@ -62,7 +62,7 @@ func (u *ApppushReserve) SetReserve(ctx context.Context, userId uint64, liveId u
 		return "", fmt.Errorf("set exists reserve: %v", err)
 	}
 
-	return u.a.ZSetReserve(ctx, userId, liveId)
+	return u.a.CasZadd(ctx, userId, liveId)
 }
 
 func (u *ApppushReserve) load(ctx context.Context, userId uint64) (string, error) {
@@ -72,7 +72,7 @@ func (u *ApppushReserve) load(ctx context.Context, userId uint64) (string, error
 	lockKey := fmt.Sprintf("reserve:%d", userId)
 	err := u.l.Lock(ctx, lockKey, "get-reserve-lock")
 	if err != nil {
-		v, err := u.a.ZGetReserve(ctx, userId)
+		v, err := u.a.Zrange(ctx, userId)
 		if err != nil {
 			if !errors.Is(err, errorz.ErrResourceNotFound) {
 				return "", err
@@ -89,7 +89,7 @@ func (u *ApppushReserve) load(ctx context.Context, userId uint64) (string, error
 	// read from storage
 	var someLiveId uint64 = 90203
 	// cache the result from storage
-	res, err := u.a.ZSetReserve(ctx, userId, someLiveId)
+	res, err := u.a.CasZadd(ctx, userId, someLiveId)
 	if err != nil {
 		return "", err
 	}

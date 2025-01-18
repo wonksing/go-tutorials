@@ -28,7 +28,7 @@ func (a *ReserveValkey) Key(userId uint64) string {
 	return fmt.Sprintf("%s%d", a.keyPrefix, userId)
 }
 
-func (r *ReserveValkey) GetReserve(ctx context.Context, userId uint64) (string, error) {
+func (r *ReserveValkey) Get(ctx context.Context, userId uint64) (string, error) {
 	c, cancel := r.client.Dedicate()
 	defer cancel()
 
@@ -42,7 +42,7 @@ func (r *ReserveValkey) GetReserve(ctx context.Context, userId uint64) (string, 
 	return res.ToString()
 }
 
-func (r *ReserveValkey) SetReserve(ctx context.Context, userId uint64, liveId uint64) (string, error) {
+func (r *ReserveValkey) Set(ctx context.Context, userId uint64, liveId uint64) (string, error) {
 	c, cancel := r.client.Dedicate()
 	defer cancel()
 
@@ -85,7 +85,7 @@ func (r *ReserveValkey) SetReserve(ctx context.Context, userId uint64, liveId ui
 	return lives, nil
 }
 
-func (a *ReserveValkey) ZGetReserve(ctx context.Context, userId uint64) (string, error) {
+func (a *ReserveValkey) Zrange(ctx context.Context, userId uint64) (string, error) {
 	c, cancel := a.client.Dedicate()
 	defer cancel()
 
@@ -108,15 +108,28 @@ func (a *ReserveValkey) ZGetReserve(ctx context.Context, userId uint64) (string,
 	return strings.Join(res, ","), nil
 }
 
-func (a *ReserveValkey) ZSetReserve(ctx context.Context, userId uint64, liveId uint64) (string, error) {
+func (a *ReserveValkey) Zadd(ctx context.Context, userId uint64, liveId uint64) (int64, error) {
+	c, cancel := a.client.Dedicate()
+	defer cancel()
+
+	key := a.Key(userId)
+	res, err := c.Do(ctx, c.B().Zadd().Key(key).ScoreMember().ScoreMember(float64(liveId), fmt.Sprintf("%d", liveId)).Build()).AsInt64()
+	if err != nil {
+		return 0, err
+	}
+
+	return res, nil
+}
+
+func (a *ReserveValkey) CasZadd(ctx context.Context, userId uint64, liveId uint64) (string, error) {
 	if a.retry == 0 {
-		return a.zaddReserve(ctx, userId, liveId)
+		return a.casZadd(ctx, userId, liveId)
 	}
 
 	var res string
 	var err error
 	for i := int8(0); i < a.retry; i++ {
-		res, err = a.zaddReserve(ctx, userId, liveId)
+		res, err = a.casZadd(ctx, userId, liveId)
 		if err == nil {
 			return res, nil
 		}
@@ -126,7 +139,7 @@ func (a *ReserveValkey) ZSetReserve(ctx context.Context, userId uint64, liveId u
 	return "", fmt.Errorf("set reserve: retry limit reached: %v", err)
 }
 
-func (a *ReserveValkey) ZSetExistsReserve(ctx context.Context, userId uint64) error {
+func (a *ReserveValkey) Exists(ctx context.Context, userId uint64) error {
 
 	c, cancel := a.client.Dedicate()
 	defer cancel()
@@ -149,7 +162,7 @@ func (a *ReserveValkey) ZSetExistsReserve(ctx context.Context, userId uint64) er
 	return nil
 }
 
-func (a *ReserveValkey) zaddReserve(ctx context.Context, userId uint64, liveId uint64) (string, error) {
+func (a *ReserveValkey) casZadd(ctx context.Context, userId uint64, liveId uint64) (string, error) {
 	c, cancel := a.client.Dedicate()
 	defer cancel()
 
