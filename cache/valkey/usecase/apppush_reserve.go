@@ -25,12 +25,18 @@ func NewApppushReserve(l *distlock.DistLockValkeyV2, a *adapter.ReserveValkey) *
 func (u *ApppushReserve) GetReserve(ctx context.Context, userId uint64) (string, error) {
 	r, err := u.a.ZGetReserve(ctx, userId)
 	if err == nil {
-		// return immediately if found in cache
-		return r, nil
-	}
+		if r != "" {
+			// return immediately if found in cache
+			return r, nil
+		}
 
-	if !errors.Is(err, errorz.ErrResourceNotFound) {
-		return "", err
+		err = u.a.ZSetExistsReserve(ctx, userId)
+		if err == nil {
+			return "", nil
+		}
+		if !errors.Is(err, errorz.ErrResourceNotFound) {
+			return "", err
+		}
 	}
 
 	// load from storage
@@ -39,9 +45,14 @@ func (u *ApppushReserve) GetReserve(ctx context.Context, userId uint64) (string,
 
 func (u *ApppushReserve) SetReserve(ctx context.Context, userId uint64, liveId uint64) (string, error) {
 	var err error
-	_, err = u.GetReserve(ctx, userId)
-	if err != nil {
-		return "", fmt.Errorf("get reserve: %v", err)
+	err = u.a.ZSetExistsReserve(ctx, userId)
+	if errors.Is(err, errorz.ErrResourceNotFound) {
+		_, err = u.load(ctx, userId)
+		if err != nil {
+			return "", err
+		}
+	} else if err != nil {
+		return "", fmt.Errorf("set exists reserve: %v", err)
 	}
 
 	return u.a.ZSetReserve(ctx, userId, liveId)
@@ -66,16 +77,14 @@ func (u *ApppushReserve) load(ctx context.Context, userId uint64) (string, error
 
 	// read from storage
 	// return "", nil if no data found from storage
-	return "", nil
+	// return "", nil
 
-	/*
-		// read from storage
-		var someLiveId uint64 = 90203
-		// cache the result from storage
-		res, err := u.a.ZSetReserve(ctx, userId, someLiveId)
-		if err != nil {
-			return "", err
-		}
-		return res, nil
-	*/
+	// read from storage
+	var someLiveId uint64 = 90203
+	// cache the result from storage
+	res, err := u.a.ZSetReserve(ctx, userId, someLiveId)
+	if err != nil {
+		return "", err
+	}
+	return res, nil
 }

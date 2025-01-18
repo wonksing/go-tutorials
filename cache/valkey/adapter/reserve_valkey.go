@@ -100,9 +100,11 @@ func (a *ReserveValkey) ZGetReserve(ctx context.Context, userId uint64) (string,
 		return "", err
 	}
 
-	if len(res) == 0 {
-		return "", errorz.ErrResourceNotFound
-	}
+	// DO CHECK WITH 'EXISTS' COMMAND
+	// if len(res) == 0 {
+	// 	return "", errorz.ErrResourceNotFound
+	// }
+
 	return strings.Join(res, ","), nil
 }
 
@@ -122,6 +124,29 @@ func (a *ReserveValkey) ZSetReserve(ctx context.Context, userId uint64, liveId u
 	}
 
 	return "", fmt.Errorf("set reserve: retry limit reached: %v", err)
+}
+
+func (a *ReserveValkey) ZSetExistsReserve(ctx context.Context, userId uint64) error {
+
+	c, cancel := a.client.Dedicate()
+	defer cancel()
+
+	key := a.Key(userId)
+
+	// returns empty slice if the key does not exist
+	res, err := c.Do(ctx, c.B().Exists().Key(key).Build()).AsInt64()
+	if err != nil {
+		if valkey.IsValkeyNil(err) {
+			return errorz.ErrResourceNotFound
+		}
+		return err
+	}
+
+	if res == 0 {
+		return errorz.ErrResourceNotFound
+	}
+
+	return nil
 }
 
 func (a *ReserveValkey) zaddReserve(ctx context.Context, userId uint64, liveId uint64) (string, error) {

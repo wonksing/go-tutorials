@@ -92,7 +92,6 @@ func main() {
 	userIds := []uint64{1, 2, 3, 4, 5}
 	// userIds := []uint64{1}
 	liveIds := []uint64{10108, 10109, 10110, 10111, 10112}
-	// rand.Int63n(5)
 	numTests := 300
 	numClients := 3
 	var wg sync.WaitGroup
