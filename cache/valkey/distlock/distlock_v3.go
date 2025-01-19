@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -111,14 +110,19 @@ func (d *DistLockValkeyV3) releaseLockChans(key string) {
 		select {
 		case c <- key:
 		default:
-			if len(c) == 0 {
-				close(c)
-				delete(d.lockChans, key)
-				d.lockMeasure.IncChanDeleted()
-				return
-			}
-			log.Println("channel is not empty")
+			close(c)
+			delete(d.lockChans, key)
+			d.lockMeasure.IncChanDeleted()
 			return
+
+			// if len(c) == 0 {
+			// 	close(c)
+			// 	delete(d.lockChans, key)
+			// 	d.lockMeasure.IncChanDeleted()
+			// 	return
+			// }
+			// log.Println("channel is not empty")
+			// return
 		}
 	}
 
